@@ -1,3 +1,3 @@
 # frogger
 
-## https://pages.github.io/alexjpaz-twitch/frogger?channel=
+## https://alexjpaz-twitch.github.io/frogger?channel=
