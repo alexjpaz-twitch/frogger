@@ -6,7 +6,7 @@
   "scripts": {
     "test": "echo 'test'",
     "start": "webpack serve",
-    "build": "webpack --production"
+    "build": "webpack --mode=production"
   },
   "repository": {
     "type": "git",
