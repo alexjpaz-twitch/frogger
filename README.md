@@ -1,3 +1,3 @@
-# sokoban
+# frogger
 
-## https://github.com/alexjpaz-twitch/sokoban?channel=
+## https://github.com/alexjpaz-twitch/frogger?channel=

@@ -1,5 +1,5 @@
 {
-  "name": "sokoban",
+  "name": "frogger",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -10,15 +10,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/alexjpaz-twitch/sokoban.git"
+    "url": "git+https://github.com/alexjpaz-twitch/frogger.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/alexjpaz-twitch/sokoban/issues"
+    "url": "https://github.com/alexjpaz-twitch/frogger/issues"
   },
-  "homepage": "https://github.com/alexjpaz-twitch/sokoban#readme",
+  "homepage": "https://github.com/alexjpaz-twitch/frogger#readme",
   "dependencies": {
     "comfy.js": "^1.1.6",
     "html-webpack-plugin": "^5.2.0",

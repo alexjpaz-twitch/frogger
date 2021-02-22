@@ -1,300 +1,368 @@
 const ComfyJS = require('comfy.js');
 
-const { levels, getRandomLevel } = require('./levels');
-
 const canvas = document.getElementById('game');
 const context = canvas.getContext('2d');
 
-const grid = 64;
+const grid = 48;
+const gridGap = 10;
 
-// create a new canvas and draw the wall image. then we can use this
-// canvas to draw the images later on
-const wallCanvas = document.createElement('canvas');
-const wallCtx = wallCanvas.getContext('2d');
-wallCanvas.width = wallCanvas.height = grid;
+// a simple sprite prototype function
+function Sprite(props) {
+  // shortcut for assigning all object properties to the sprite
+  Object.assign(this, props);
+}
+Sprite.prototype.render = function() {
+  context.fillStyle = this.color;
 
-wallCtx.fillStyle = '#5b5530';
-wallCtx.fillRect(0, 0, grid, grid);
-wallCtx.fillStyle = '#a19555';
-
-// 1st row brick
-wallCtx.fillRect(1, 1, grid - 2, 20);
-
-// 2nd row bricks
-wallCtx.fillRect(0, 23, 20, 18);
-wallCtx.fillRect(22, 23, 42, 18);
-
-// 3rd row bricks
-wallCtx.fillRect(0, 43, 42, 20);
-wallCtx.fillRect(44, 43, 20, 20);
-
-// the direction to move the player each frame. we'll use change in
-// direction so "row: 1" means move down 1 row, "row: -1" means move
-// up one row, etc.
-let playerDir = { row: 0, col: 0 };
-let playerPos = { row: 0, col: 0 };  // player position in the 2d array
-let rAF = null;  // keep track of the animation frame so we can cancel it
-let width = 0;  // find the largest row and use that as the game width
-
-// create a mapping of object types using the sok file format
-// @see http://www.sokobano.de/wiki/index.php?title=Level_format
-const types = {
-  wall: '#',
-  player: '@',
-  playerOnGoal: '+',
-  block: '$',
-  blockOnGoal: '*',
-  goal: '.',
-  empty: ' '
-};
-
-// a sokoban level using the sok file format
-
-
-let level = getRandomLevel();
-
-// keep track of what is in every cell of the game using a 2d array
-const cells = [];
-
-// use each line of the level as the row (remove empty lines)
-level.split('\n')
-  .filter(rowData => !!rowData)
-  .forEach((rowData, row) => {
-    cells[row] = [];
-
-    if (rowData.length > width) {
-      width = rowData.length;
-    }
-
-    // use each character of the level as the col
-    rowData.split('').forEach((colData, col) => {
-      cells[row][col] = colData;
-
-      if (colData === types.player || colData === types.playerOnGoal) {
-        playerPos = { row, col };
-      }
-    });
-});
-
-// update the size of the canvas to the level size
-canvas.width = width * grid;
-canvas.height = cells.length * grid;
-
-// move an entity from one cell to another
-function move(startPos, endPos) {
-  const startCell = cells[startPos.row][startPos.col];
-  const endCell = cells[endPos.row][endPos.col];
-
-  const isPlayer = startCell === types.player || startCell === types.playerOnGoal;
-
-  // first remove then entity from its current cell
-  switch(startCell) {
-
-    // if the start cell is the player or a block (no goal)
-    // then leave empty
-    case types.player:
-    case types.block:
-      cells[startPos.row][startPos.col] = types.empty;
-      break;
-
-    // if the start cell has a goal then leave a goal
-    case types.playerOnGoal:
-    case types.blockOnGoal:
-      cells[startPos.row][startPos.col] = types.goal;
-      break;
+  // draw a rectangle sprite
+  if (this.shape === 'rect') {
+    // by using a size less than the grid we can ensure there is a visual space
+    // between each row
+    context.fillRect(this.x, this.y + gridGap / 2, this.size, grid - gridGap);
   }
-
-  // then move then entity into the new cell
-  switch(endCell) {
-
-    // if the end cell is empty, add the block or player
-    case types.empty:
-      cells[endPos.row][endPos.col] = isPlayer ? types.player : types.block;
-      break;
-
-    // if the cell has a goal then make sure to preserve the goal
-    case types.goal:
-      cells[endPos.row][endPos.col] = isPlayer ? types.playerOnGoal : types.blockOnGoal;
-      break;
+  // draw a circle sprite. since size is the diameter we need to divide by 2
+  // to get the radius. also the x/y position needs to be centered instead of
+  // the top-left corner of the sprite
+  else {
+    context.beginPath();
+    context.arc(
+      this.x + this.size / 2, this.y + this.size / 2,
+      this.size / 2 - gridGap / 2, 0, 2 * Math.PI
+    );
+    context.fill();
   }
 }
 
-// show the win screen
-function showWin() {
-  cancelAnimationFrame(rAF);
+const frogger = new Sprite({
+  x: grid * 6,
+  y: grid * 13,
+  color: 'greenyellow',
+  size: grid,
+  shape: 'circle'
+});
+const scoredFroggers = [];
 
-  context.fillStyle = 'black';
-  context.globalAlpha = 0.75;
-  context.fillRect(0, canvas.height / 2 - 30, canvas.width, 60);
+// a pattern describes each obstacle in the row
+const patterns = [
+  // end bank is safe
+  null,
 
-  context.globalAlpha = 1;
-  context.fillStyle = 'white';
-  context.font = '36px monospace';
-  context.textAlign = 'center';
-  context.textBaseline = 'middle';
-  context.fillText('YOU WIN!', canvas.width / 2, canvas.height / 2);
+  // log
+  {
+    spacing: [2],      // how many grid spaces between each obstacle
+    color: '#c55843',  // color of the obstacle
+    size: grid * 4,    // width (rect) / diameter (circle) of the obstacle
+    shape: 'rect',     // shape of the obstacle (rect or circle)
+    speed: 0.75        // how fast the obstacle moves and which direction
+  },
+
+  // turtle
+  {
+    spacing: [0,2,0,2,0,2,0,4],
+    color: '#de0004',
+    size: grid,
+    shape: 'circle',
+    speed: -1
+  },
+
+  // long log
+  {
+    spacing: [2],
+    color: '#c55843',
+    size: grid * 7,
+    shape: 'rect',
+    speed: 1.5
+  },
+
+  // log
+  {
+    spacing: [3],
+    color: '#c55843',
+    size: grid * 3,
+    shape: 'rect',
+    speed: 0.5
+  },
+
+  // turtle
+  {
+    spacing: [0,0,1],
+    color: '#de0004',
+    size: grid,
+    shape: 'circle',
+    speed: -1
+  },
+
+  // beach is safe
+  null,
+
+  // truck
+  {
+    spacing: [3,8],
+    color: '#c2c4da',
+    size: grid * 2,
+    shape: 'rect',
+    speed: -1
+  },
+
+  // fast car
+  {
+    spacing: [14],
+    color: '#c2c4da',
+    size: grid,
+    shape: 'rect',
+    speed: 0.75
+  },
+
+  // car
+  {
+    spacing: [3,3,7],
+    color: '#de3cdd',
+    size: grid,
+    shape: 'rect',
+    speed: -0.75
+  },
+
+  // bulldozer
+  {
+    spacing: [3,3,7],
+    color: '#0bcb00',
+    size: grid,
+    shape: 'rect',
+    speed: 0.5
+  },
+
+  // car
+  {
+    spacing: [4],
+    color: '#e5e401',
+    size: grid,
+    shape: 'rect',
+    speed: -0.5
+  },
+
+  // start zone is safe
+  null
+];
+
+// rows holds all the sprites for that row
+const rows = [];
+for (let i = 0; i < patterns.length; i++) {
+  rows[i] = [];
+
+  let x = 0;
+  let index = 0;
+  const pattern = patterns[i];
+
+  // skip empty patterns (safe zones)
+  if (!pattern) {
+    continue;
+  }
+
+  // allow there to be 1 extra pattern offscreen so the loop is seamless
+  // (especially for the long log)
+  let totalPatternWidth =
+    pattern.spacing.reduce((acc, space) => acc + space, 0) * grid +
+    pattern.spacing.length * pattern.size;
+  let endX = 0;
+  while (endX < canvas.width) {
+    endX += totalPatternWidth;
+  }
+  endX += totalPatternWidth;
+
+  // populate the row with sprites
+  while (x < endX) {
+    rows[i].push(new Sprite({
+      x,
+      y: grid * (i + 1),
+      index,
+      ...pattern
+    }));
+
+    // move the next sprite over according to the spacing
+    const spacing = pattern.spacing;
+    x += pattern.size + spacing[index] * grid;
+    index = (index + 1) % spacing.length;
+  }
 }
 
 // game loop
 function loop() {
-  rAF = requestAnimationFrame(loop);
+  requestAnimationFrame(loop);
   context.clearRect(0,0,canvas.width,canvas.height);
 
-  // check to see if the player can move in the desired direction
-  const row = playerPos.row + playerDir.row;
-  const col = playerPos.col + playerDir.col;
-  const cell = cells[row][col];
-  switch(cell) {
+  // draw the game background
+  // water
+  context.fillStyle = '#000047';
+  context.fillRect(0, grid, canvas.width, grid * 6);
 
-    // allow the player to move into empty or goal cells
-    case types.empty:
-    case types.goal:
-      move(playerPos, { row, col });
-
-      playerPos.row = row;
-      playerPos.col = col;
-      break;
-
-    // don't allow the player to move into a wall cell
-    case types.wall:
-      break;
-
-    // only allow the player to move into a block cell if the cell
-    // after the block is empty or a goal
-    case types.block:
-    case types.blockOnGoal:
-      const nextRow = row + playerDir.row;
-      const nextCol = col + playerDir.col;
-      const nextCell = cells[nextRow][nextCol];
-
-      if (nextCell === types.empty || nextCell === types.goal) {
-        // move the block first, then the player
-        move({ row, col }, { row: nextRow, col: nextCol });
-        move(playerPos, { row, col });
-
-        playerPos.row = row;
-        playerPos.col = col;
-      }
-      break;
+  // end bank
+  context.fillStyle = '#1ac300';
+  context.fillRect(0, grid, canvas.width, 5);
+  context.fillRect(0, grid, 5, grid);
+  context.fillRect(canvas.width - 5, grid, 5, grid);
+  for (let i = 0; i < 4; i++) {
+    context.fillRect(grid + grid * 3 * i, grid, grid * 2, grid);
   }
 
-  // reset player dir after checking move
-  playerDir = { row: 0, col: 0 };
+  // beach
+  context.fillStyle = '#8500da';
+  context.fillRect(0, 7 * grid, canvas.width, grid);
 
-  // check to see if all blocks are on goals
-  let allBlocksOnGoals = true;
+  // start zone
+  context.fillRect(0, canvas.height - grid * 2, canvas.width, grid);
 
-  // draw the board. because multiple things can be drawn on the same
-  // cell we shouldn't use a switch as that would only allow us to draw
-  // a single thing per cell
-  context.strokeStyle = 'black';
-  context.lineWidth = 2;
-  for (let row = 0; row < cells.length; row++) {
-    for (let col = 0; col < cells[row].length; col++) {
-      const cell = cells[row][col];
+  // update and draw obstacles
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r];
 
-      if (cell === types.wall) {
-        context.drawImage(wallCanvas, col * grid, row * grid);
-      }
+    for (let i = 0; i < row.length; i++) {
+      const sprite = row[i]
+      sprite.x += sprite.speed;
+      sprite.render();
 
-      if (cell === types.block || cell === types.blockOnGoal) {
-        if (cell === types.block) {
-          context.fillStyle = '#ffbb5b';
+      // loop sprite around the screen
+      // sprite is moving to the left and goes offscreen
+      if (sprite.speed < 0 && sprite.x < 0 - sprite.size) {
 
-          // block is not on goal
-          allBlocksOnGoals = false;
-        }
-        else {
-          context.fillStyle = '#ba6a15';
+        // find the rightmost sprite
+        let rightMostSprite = sprite;
+        for (let j = 0; j < row.length; j++) {
+          if (row[j].x > rightMostSprite.x) {
+            rightMostSprite = row[j];
+          }
         }
 
-        context.fillRect(col * grid, row * grid, grid, grid);
-        context.strokeRect(col * grid, row * grid, grid, grid);
-        context.strokeRect((col + 0.1) * grid, (row + 0.1) * grid, grid - (0.2 * grid), grid - (0.2 * grid));
-
-        // X
-        context.beginPath();
-        context.moveTo((col + 0.1) * grid, (row + 0.1) * grid);
-        context.lineTo((col + 0.9) * grid, (row + 0.9) * grid);
-        context.moveTo((col + 0.9) * grid, (row + 0.1) * grid);
-        context.lineTo((col + 0.1) * grid, (row + 0.9) * grid);
-        context.stroke();
+        // move the sprite to the next spot in the pattern so it continues
+        const spacing = patterns[r].spacing;
+        sprite.x =
+          rightMostSprite.x + rightMostSprite.size +
+          spacing[rightMostSprite.index] * grid;
+        sprite.index = (rightMostSprite.index + 1) % spacing.length;
       }
 
-      if (cell === types.goal || cell === types.playerOnGoal) {
-        context.fillStyle = '#914430';
-        context.beginPath();
-        context.arc((col + 0.5) * grid, (row + 0.5) * grid, 10, 0, Math.PI * 2);
-        context.fill();
-      }
+      // sprite is moving to the right and goes offscreen
+      if (sprite.speed > 0 && sprite.x > canvas.width) {
 
-      if (cell === types.player || cell === types.playerOnGoal) {
-        context.fillStyle = 'black';
-        context.beginPath();
+        // find the leftmost sprite
+        let leftMostSprite = sprite;
+        for (let j = 0; j < row.length; j++) {
+          if (row[j].x < leftMostSprite.x) {
+            leftMostSprite = row[j];
+          }
+        }
 
-        // head
-        context.arc((col + 0.5) * grid, (row + 0.3) * grid, 8, 0, Math.PI * 2);
-        context.fill();
-        // body
-        context.fillRect((col + 0.48) * grid, (row + 0.3) * grid, 2, grid/ 2.5 );
-        // arms
-        context.fillRect((col + 0.3) * grid, (row + 0.5) * grid, grid / 2.5, 2);
-        // legs
-        context.moveTo((col + 0.5) * grid, (row + 0.7) * grid);
-        context.lineTo((col + 0.65) * grid, (row + 0.9) * grid);
-        context.moveTo((col + 0.5) * grid, (row + 0.7) * grid);
-        context.lineTo((col + 0.35) * grid, (row + 0.9) * grid);
-        context.stroke();
+        // move the sprite to the next spot in the pattern so it continues
+        const spacing = patterns[r].spacing;
+        let index = leftMostSprite.index - 1;
+        index = index >= 0 ? index : spacing.length - 1;
+        sprite.x = leftMostSprite.x - spacing[index] * grid - sprite.size;
+        sprite.index = index;
       }
     }
   }
 
-  if (allBlocksOnGoals) {
-    showWin();
+  // draw frogger
+  frogger.x += frogger.speed || 0;
+  frogger.render();
+
+  // draw scored froggers
+  scoredFroggers.forEach(frog => frog.render());
+
+  // check for collision with all sprites in the same row as frogger
+  const froggerRow = frogger.y / grid - 1 | 0;
+  let collision = false;
+  for (let i = 0; i < rows[froggerRow].length; i++) {
+    let sprite = rows[froggerRow][i];
+
+    // axis-aligned bounding box (AABB) collision check
+    // treat any circles as rectangles for the purposes of collision
+    if (frogger.x < sprite.x + sprite.size - gridGap &&
+        frogger.x + grid - gridGap > sprite.x &&
+        frogger.y < sprite.y + grid &&
+        frogger.y + grid > sprite.y) {
+      collision = true;
+
+      // reset frogger if got hit by car
+      if (froggerRow > rows.length / 2) {
+        frogger.x = grid * 6;
+        frogger.y = grid * 13;
+      }
+      // move frogger along with obstacle
+      else {
+        frogger.speed = sprite.speed;
+      }
+    }
+  }
+
+  if (!collision) {
+    // if fogger isn't colliding reset speed
+    frogger.speed = 0;
+
+    // frogger got to end bank (goal every 3 cols)
+    const col = (frogger.x + grid / 2) / grid | 0;
+    if (froggerRow === 0 && col % 3 === 0 &&
+        // check to see if there isn't a scored frog already there
+        !scoredFroggers.find(frog => frog.x === col * grid)) {
+      scoredFroggers.push(new Sprite({
+        ...frogger,
+        x: col * grid,
+        y: frogger.y + 5
+      }));
+    }
+
+    // reset frogger if not on obstacle in river
+    if (froggerRow < rows.length / 2 - 1) {
+      frogger.x = grid * 6;
+      frogger.y = grid * 13;
+    }
   }
 }
 
-// listen to keyboard events to move the snake
+// listen to keyboard events to move frogger
 document.addEventListener('keydown', function(e) {
-  playerDir = { row: 0, col: 0};
-
   // left arrow key
   if (e.which === 37) {
-    playerDir.col = -1;
-  }
-  // up arrow key
-  else if (e.which === 38) {
-    playerDir.row = -1;
+    frogger.x -= grid;
   }
   // right arrow key
   else if (e.which === 39) {
-    playerDir.col = 1;
+    frogger.x += grid;
+  }
+
+  // up arrow key
+  else if (e.which === 38) {
+    frogger.y -= grid;
   }
   // down arrow key
   else if (e.which === 40) {
-    playerDir.row = 1;
+    frogger.y += grid;
   }
+
+  // clamp frogger position to stay on screen
+  frogger.x = Math.min( Math.max(0, frogger.x), canvas.width - grid);
+  frogger.y = Math.min( Math.max(grid, frogger.y), canvas.height - grid * 2);
 });
+
 
 ComfyJS.onChat = ( user, message, flags, extra ) => {
   let msg = message.toLowerCase();
 
   // left arrow key
   if (msg === 'l') {
-    playerDir.col = -1;
+   frogger.x -= grid;
   }
   // right arrow key
   else if (msg === 'r') {
-    playerDir.col = 1;
+    frogger.x += grid;
   }
 
   // up arrow key
   else if (msg === 'u') {
-    playerDir.row = -1;
+    frogger.y -= grid;
   }
   // down arrow key
   else if (msg === 'd') {
-    playerDir.row = 1;
+    frogger.y += grid;
   }
 
   // clamp frogger position to stay on screen
@@ -302,10 +370,9 @@ ComfyJS.onChat = ( user, message, flags, extra ) => {
   frogger.y = Math.min( Math.max(grid, frogger.y), canvas.height - grid * 2);
 }
 
-const urlParams = new URLSearchParams(window.location.search);
-const channel = urlParams.get('channel');
-
-ComfyJS.Init( channel );
+ComfyJS.Init( "alexjpaz" );
 
 // start the game
 requestAnimationFrame(loop);
+
+
